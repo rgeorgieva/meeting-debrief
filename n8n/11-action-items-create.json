@@ -1,0 +1,168 @@
+{
+  "name": "Meeting Debrief - Action Item Create",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "meetings/:id/action-items", "responseMode": "responseNode", "options": {} },
+      "id": "fb000001-0000-0000-0000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [100, 300],
+      "webhookId": "action-items-create"
+    },
+    {
+      "parameters": {
+        "jsCode": "const headers = $input.first().json.headers || {};\nconst authHeader = headers['authorization'] || headers['Authorization'] || '';\nconst match = /^Bearer\\s+([a-f0-9]{64})$/i.exec(authHeader);\nif (!match) return [{ json: { ok: false } }];\nreturn [{ json: { ok: true, token: match[1] } }];"
+      },
+      "id": "fb000001-0000-0000-0000-000000000002",
+      "name": "Extract Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "id": "c1", "leftValue": "={{ $json.ok }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }], "combinator": "and" },
+        "options": {}
+      },
+      "id": "fb000001-0000-0000-0000-000000000003",
+      "name": "Token present?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT u.id FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1 AND s.expires_at > now() LIMIT 1;",
+        "options": { "queryReplacement": "={{ $json.token }}" }
+      },
+      "id": "fb000001-0000-0000-0000-000000000004",
+      "name": "Lookup Session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [700, 200],
+      "credentials": { "postgres": { "id": "REPLACE_WITH_YOUR_POSTGRES_CREDENTIAL_ID", "name": "Supabase Postgres" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "id": "c2", "leftValue": "={{ $json.id }}", "rightValue": "", "operator": { "type": "string", "operation": "exists", "singleValue": true } }], "combinator": "and" },
+        "options": {}
+      },
+      "id": "fb000001-0000-0000-0000-000000000005",
+      "name": "Session valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const params = $('Webhook').first().json.params || {};\nconst body = $('Webhook').first().json.body || {};\nconst userId = $input.first().json.id;\nconst meetingId = params.id || '';\nconst text = (body.text || '').trim();\nif (!/^[0-9a-f-]{36}$/i.test(meetingId)) return [{ json: { ok: false, status: 404, error: 'not_found', message: 'Meeting not found.' } }];\nif (!text) return [{ json: { ok: false, status: 400, error: 'invalid_input', message: 'Text is required.' } }];\nreturn [{ json: { ok: true, payload: { userId, meetingId, text, owner: body.owner || null } } }];"
+      },
+      "id": "fb000001-0000-0000-0000-000000000006",
+      "name": "Parse Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 100]
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "id": "c3", "leftValue": "={{ $json.ok }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }], "combinator": "and" },
+        "options": {}
+      },
+      "id": "fb000001-0000-0000-0000-000000000007",
+      "name": "Input valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1300, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH params AS (\n  SELECT $1::jsonb AS p\n)\nINSERT INTO action_items (meeting_id, user_id, text, owner, position)\nSELECT m.id, (params.p->>'userId')::uuid, params.p->>'text', params.p->>'owner',\n  COALESCE((SELECT MAX(position) + 1 FROM action_items WHERE meeting_id = m.id), 0)\nFROM meetings m, params\nWHERE m.id = (params.p->>'meetingId')::uuid AND m.user_id = (params.p->>'userId')::uuid\nRETURNING id, text, owner, is_done as \"isDone\", completed_at as \"completedAt\", position, created_at as \"createdAt\";",
+        "options": { "queryReplacement": "={{ JSON.stringify($json.payload) }}" }
+      },
+      "id": "fb000001-0000-0000-0000-000000000008",
+      "name": "Insert Item",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1500, 100],
+      "credentials": { "postgres": { "id": "REPLACE_WITH_YOUR_POSTGRES_CREDENTIAL_ID", "name": "Supabase Postgres" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "id": "c4", "leftValue": "={{ $json.id }}", "rightValue": "", "operator": { "type": "string", "operation": "exists", "singleValue": true } }], "combinator": "and" },
+        "options": {}
+      },
+      "id": "fb000001-0000-0000-0000-000000000009",
+      "name": "Inserted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1700, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ actionItem: $json }) }}",
+        "options": { "responseCode": 201 }
+      },
+      "id": "fb000001-0000-0000-0000-00000000000a",
+      "name": "Respond Created",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1900, 50]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"error\": \"not_found\", \"message\": \"Meeting not found.\" }",
+        "options": { "responseCode": 404 }
+      },
+      "id": "fb000001-0000-0000-0000-00000000000b",
+      "name": "Respond Not Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1700, 280]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"error\": \"{{ $json.error }}\", \"message\": \"{{ $json.message }}\" }",
+        "options": { "responseCode": "={{ $json.status }}" }
+      },
+      "id": "fb000001-0000-0000-0000-00000000000c",
+      "name": "Respond Input Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1300, 280]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"error\": \"invalid_session\", \"message\": \"Session is missing, invalid, or expired.\" }",
+        "options": { "responseCode": 401 }
+      },
+      "id": "fb000001-0000-0000-0000-00000000000d",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [700, 440]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Extract Token", "type": "main", "index": 0 }]] },
+    "Extract Token": { "main": [[{ "node": "Token present?", "type": "main", "index": 0 }]] },
+    "Token present?": { "main": [[{ "node": "Lookup Session", "type": "main", "index": 0 }], [{ "node": "Respond Unauthorized", "type": "main", "index": 0 }]] },
+    "Lookup Session": { "main": [[{ "node": "Session valid?", "type": "main", "index": 0 }]] },
+    "Session valid?": { "main": [[{ "node": "Parse Input", "type": "main", "index": 0 }], [{ "node": "Respond Unauthorized", "type": "main", "index": 0 }]] },
+    "Parse Input": { "main": [[{ "node": "Input valid?", "type": "main", "index": 0 }]] },
+    "Input valid?": { "main": [[{ "node": "Insert Item", "type": "main", "index": 0 }], [{ "node": "Respond Input Error", "type": "main", "index": 0 }]] },
+    "Insert Item": { "main": [[{ "node": "Inserted?", "type": "main", "index": 0 }]] },
+    "Inserted?": { "main": [[{ "node": "Respond Created", "type": "main", "index": 0 }], [{ "node": "Respond Not Found", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": []
+}

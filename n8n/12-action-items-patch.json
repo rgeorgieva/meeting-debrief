@@ -1,0 +1,144 @@
+{
+  "name": "Meeting Debrief - Action Item Patch",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "PATCH", "path": "action-items/:id", "responseMode": "responseNode", "options": {} },
+      "id": "fc000001-0000-0000-0000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [100, 300],
+      "webhookId": "action-items-patch"
+    },
+    {
+      "parameters": {
+        "jsCode": "const headers = $input.first().json.headers || {};\nconst authHeader = headers['authorization'] || headers['Authorization'] || '';\nconst match = /^Bearer\\s+([a-f0-9]{64})$/i.exec(authHeader);\nif (!match) return [{ json: { ok: false } }];\nreturn [{ json: { ok: true, token: match[1] } }];"
+      },
+      "id": "fc000001-0000-0000-0000-000000000002",
+      "name": "Extract Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "id": "c1", "leftValue": "={{ $json.ok }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }], "combinator": "and" },
+        "options": {}
+      },
+      "id": "fc000001-0000-0000-0000-000000000003",
+      "name": "Token present?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT u.id FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1 AND s.expires_at > now() LIMIT 1;",
+        "options": { "queryReplacement": "={{ $json.token }}" }
+      },
+      "id": "fc000001-0000-0000-0000-000000000004",
+      "name": "Lookup Session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [700, 200],
+      "credentials": { "postgres": { "id": "REPLACE_WITH_YOUR_POSTGRES_CREDENTIAL_ID", "name": "Supabase Postgres" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "id": "c2", "leftValue": "={{ $json.id }}", "rightValue": "", "operator": { "type": "string", "operation": "exists", "singleValue": true } }], "combinator": "and" },
+        "options": {}
+      },
+      "id": "fc000001-0000-0000-0000-000000000005",
+      "name": "Session valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const params = $('Webhook').first().json.params || {};\nconst body = $('Webhook').first().json.body || {};\nconst userId = $input.first().json.id;\nconst itemId = params.id || '';\nif (!/^[0-9a-f-]{36}$/i.test(itemId)) return [{ json: { ok: false } }];\nconst hasIsDone = body.isDone !== undefined && body.isDone !== null;\nreturn [{\n  json: {\n    ok: true,\n    payload: {\n      userId,\n      itemId,\n      text: body.text ?? null,\n      ownerProvided: body.owner !== undefined,\n      owner: body.owner !== undefined ? (body.owner || null) : null,\n      isDoneProvided: hasIsDone,\n      isDone: hasIsDone ? !!body.isDone : false\n    }\n  }\n}];"
+      },
+      "id": "fc000001-0000-0000-0000-000000000006",
+      "name": "Parse Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH params AS (\n  SELECT $1::jsonb AS p\n)\nUPDATE action_items ai SET\n  text = COALESCE(params.p->>'text', ai.text),\n  owner = CASE WHEN (params.p->>'ownerProvided')::boolean THEN params.p->>'owner' ELSE ai.owner END,\n  is_done = CASE WHEN (params.p->>'isDoneProvided')::boolean THEN (params.p->>'isDone')::boolean ELSE ai.is_done END,\n  completed_at = CASE\n    WHEN (params.p->>'isDoneProvided')::boolean AND (params.p->>'isDone')::boolean = true AND ai.is_done = false THEN now()\n    WHEN (params.p->>'isDoneProvided')::boolean AND (params.p->>'isDone')::boolean = false THEN NULL\n    ELSE ai.completed_at\n  END\nFROM params\nWHERE ai.id = (params.p->>'itemId')::uuid\n  AND ai.user_id = (params.p->>'userId')::uuid\nRETURNING ai.id, ai.meeting_id as \"meetingId\", ai.text, ai.owner, ai.is_done as \"isDone\", ai.completed_at as \"completedAt\", ai.position;",
+        "options": { "queryReplacement": "={{ JSON.stringify($json.payload) }}" }
+      },
+      "id": "fc000001-0000-0000-0000-000000000007",
+      "name": "Update Item",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1300, 100],
+      "credentials": { "postgres": { "id": "REPLACE_WITH_YOUR_POSTGRES_CREDENTIAL_ID", "name": "Supabase Postgres" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "id": "c3", "leftValue": "={{ $json.id }}", "rightValue": "", "operator": { "type": "string", "operation": "exists", "singleValue": true } }], "combinator": "and" },
+        "options": {}
+      },
+      "id": "fc000001-0000-0000-0000-000000000008",
+      "name": "Updated?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1500, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ actionItem: $json }) }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "fc000001-0000-0000-0000-000000000009",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1700, 50]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"error\": \"not_found\", \"message\": \"Action item not found.\" }",
+        "options": { "responseCode": 404 }
+      },
+      "id": "fc000001-0000-0000-0000-00000000000a",
+      "name": "Respond Not Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1500, 280]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"error\": \"invalid_session\", \"message\": \"Session is missing, invalid, or expired.\" }",
+        "options": { "responseCode": 401 }
+      },
+      "id": "fc000001-0000-0000-0000-00000000000b",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [700, 440]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Extract Token", "type": "main", "index": 0 }]] },
+    "Extract Token": { "main": [[{ "node": "Token present?", "type": "main", "index": 0 }]] },
+    "Token present?": { "main": [[{ "node": "Lookup Session", "type": "main", "index": 0 }], [{ "node": "Respond Unauthorized", "type": "main", "index": 0 }]] },
+    "Lookup Session": { "main": [[{ "node": "Session valid?", "type": "main", "index": 0 }]] },
+    "Session valid?": { "main": [[{ "node": "Parse Input", "type": "main", "index": 0 }], [{ "node": "Respond Unauthorized", "type": "main", "index": 0 }]] },
+    "Parse Input": { "main": [[{ "node": "Update Item", "type": "main", "index": 0 }]] },
+    "Update Item": { "main": [[{ "node": "Updated?", "type": "main", "index": 0 }]] },
+    "Updated?": { "main": [[{ "node": "Respond Success", "type": "main", "index": 0 }], [{ "node": "Respond Not Found", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": []
+}

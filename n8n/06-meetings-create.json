@@ -1,0 +1,157 @@
+{
+  "name": "Meeting Debrief - Meetings Create",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "meetings", "responseMode": "responseNode", "options": {} },
+      "id": "f6000001-0000-0000-0000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [100, 300],
+      "webhookId": "meetings-create"
+    },
+    {
+      "parameters": {
+        "jsCode": "const headers = $input.first().json.headers || {};\nconst authHeader = headers['authorization'] || headers['Authorization'] || '';\nconst match = /^Bearer\\s+([a-f0-9]{64})$/i.exec(authHeader);\nif (!match) return [{ json: { ok: false } }];\nreturn [{ json: { ok: true, token: match[1] } }];"
+      },
+      "id": "f6000001-0000-0000-0000-000000000002",
+      "name": "Extract Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "id": "c1", "leftValue": "={{ $json.ok }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }], "combinator": "and" },
+        "options": {}
+      },
+      "id": "f6000001-0000-0000-0000-000000000003",
+      "name": "Token present?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT u.id FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1 AND s.expires_at > now() LIMIT 1;",
+        "options": { "queryReplacement": "={{ $json.token }}" }
+      },
+      "id": "f6000001-0000-0000-0000-000000000004",
+      "name": "Lookup Session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [700, 200],
+      "credentials": { "postgres": { "id": "REPLACE_WITH_YOUR_POSTGRES_CREDENTIAL_ID", "name": "Supabase Postgres" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "id": "c2", "leftValue": "={{ $json.id }}", "rightValue": "", "operator": { "type": "string", "operation": "exists", "singleValue": true } }], "combinator": "and" },
+        "options": {}
+      },
+      "id": "f6000001-0000-0000-0000-000000000005",
+      "name": "Session valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $('Webhook').first().json.body || {};\nconst userId = $input.first().json.id;\n\nconst title = (body.title || '').trim();\nif (!title) return [{ json: { ok: false, status: 400, error: 'invalid_input', message: 'Title is required.' } }];\n\nconst transcript = (body.transcript || '').trim();\nif (!transcript) return [{ json: { ok: false, status: 400, error: 'invalid_input', message: 'Transcript is required.' } }];\n\nreturn [{\n  json: {\n    ok: true,\n    payload: {\n      userId,\n      title,\n      meetingDate: body.meetingDate || '',\n      summary: body.summary || '',\n      transcript,\n      participants: body.participants || [],\n      decisions: body.decisions || [],\n      blockers: body.blockers || [],\n      followupEmail: body.followupEmail || '',\n      actionItems: body.actionItems || []\n    }\n  }\n}];"
+      },
+      "id": "f6000001-0000-0000-0000-000000000006",
+      "name": "Build Insert Params",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 100]
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "id": "c3", "leftValue": "={{ $json.ok }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }], "combinator": "and" },
+        "options": {}
+      },
+      "id": "f6000001-0000-0000-0000-000000000007",
+      "name": "Params valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1300, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH params AS (\n  SELECT $1::jsonb AS p\n),\nnew_meeting AS (\n  INSERT INTO meetings (user_id, title, meeting_date, summary, transcript, participants, decisions, blockers, followup_email)\n  SELECT\n    (p->>'userId')::uuid,\n    p->>'title',\n    NULLIF(p->>'meetingDate', '')::date,\n    p->>'summary',\n    p->>'transcript',\n    p->'participants',\n    p->'decisions',\n    p->'blockers',\n    p->>'followupEmail'\n  FROM params\n  RETURNING id\n),\ninserted_items AS (\n  INSERT INTO action_items (meeting_id, user_id, text, owner, position)\n  SELECT m.id, (p.p->>'userId')::uuid, item->>'text', item->>'owner', (ord - 1)::int\n  FROM new_meeting m, params p, jsonb_array_elements(p.p->'actionItems') WITH ORDINALITY arr(item, ord)\n  RETURNING id\n)\nSELECT id FROM new_meeting;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json.payload) }}"
+        }
+      },
+      "id": "f6000001-0000-0000-0000-000000000008",
+      "name": "Insert Meeting",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1500, 100],
+      "credentials": { "postgres": { "id": "REPLACE_WITH_YOUR_POSTGRES_CREDENTIAL_ID", "name": "Supabase Postgres" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst meetingId = (items[0] && items[0].json && items[0].json.id) || null;\nreturn [{ json: { id: meetingId } }];"
+      },
+      "id": "f6000001-0000-0000-0000-000000000009",
+      "name": "Extract Meeting ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1700, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"id\": \"{{ $json.id }}\" }",
+        "options": { "responseCode": 201 }
+      },
+      "id": "f6000001-0000-0000-0000-00000000000a",
+      "name": "Respond Created",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1900, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"error\": \"{{ $json.error }}\", \"message\": \"{{ $json.message }}\" }",
+        "options": { "responseCode": 400 }
+      },
+      "id": "f6000001-0000-0000-0000-00000000000b",
+      "name": "Respond Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1300, 280]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"error\": \"invalid_session\", \"message\": \"Session is missing, invalid, or expired.\" }",
+        "options": { "responseCode": 401 }
+      },
+      "id": "f6000001-0000-0000-0000-00000000000c",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [700, 440]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Extract Token", "type": "main", "index": 0 }]] },
+    "Extract Token": { "main": [[{ "node": "Token present?", "type": "main", "index": 0 }]] },
+    "Token present?": { "main": [[{ "node": "Lookup Session", "type": "main", "index": 0 }], [{ "node": "Respond Unauthorized", "type": "main", "index": 0 }]] },
+    "Lookup Session": { "main": [[{ "node": "Session valid?", "type": "main", "index": 0 }]] },
+    "Session valid?": { "main": [[{ "node": "Build Insert Params", "type": "main", "index": 0 }], [{ "node": "Respond Unauthorized", "type": "main", "index": 0 }]] },
+    "Build Insert Params": { "main": [[{ "node": "Params valid?", "type": "main", "index": 0 }]] },
+    "Params valid?": { "main": [[{ "node": "Insert Meeting", "type": "main", "index": 0 }], [{ "node": "Respond Validation Error", "type": "main", "index": 0 }]] },
+    "Insert Meeting": { "main": [[{ "node": "Extract Meeting ID", "type": "main", "index": 0 }]] },
+    "Extract Meeting ID": { "main": [[{ "node": "Respond Created", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": []
+}

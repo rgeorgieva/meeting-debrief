@@ -1,0 +1,115 @@
+{
+  "name": "Meeting Debrief - Auth Logout",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "auth/logout",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f4a4a4a4-0004-0004-0004-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "auth-logout"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Meeting Debrief: extract session token from Authorization header ===\nconst headers = $input.first().json.headers || {};\nconst authHeader = headers['authorization'] || headers['Authorization'] || '';\n\nconst match = /^Bearer\\s+([a-f0-9]{64})$/i.exec(authHeader);\nif (!match) {\n  return [{ json: { ok: false } }];\n}\n\nreturn [{ json: { ok: true, token: match[1] } }];"
+      },
+      "id": "f4a4a4a4-0004-0004-0004-000000000002",
+      "name": "Extract Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f4a4a4a4-0004-0004-0004-000000000003",
+      "name": "Token present?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM sessions WHERE token = $1;",
+        "options": {
+          "queryReplacement": "={{ $json.token }}"
+        }
+      },
+      "id": "f4a4a4a4-0004-0004-0004-000000000004",
+      "name": "Delete Session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [920, 200],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true }",
+        "options": { "responseCode": 200 }
+      },
+      "id": "f4a4a4a4-0004-0004-0004-000000000005",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1160, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"error\": \"invalid_session\", \"message\": \"Session is missing or invalid.\" }",
+        "options": { "responseCode": 401 }
+      },
+      "id": "f4a4a4a4-0004-0004-0004-000000000006",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [920, 440]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Extract Token", "type": "main", "index": 0 }]]
+    },
+    "Extract Token": {
+      "main": [[{ "node": "Token present?", "type": "main", "index": 0 }]]
+    },
+    "Token present?": {
+      "main": [
+        [{ "node": "Delete Session", "type": "main", "index": 0 }],
+        [{ "node": "Respond Unauthorized", "type": "main", "index": 0 }]
+      ]
+    },
+    "Delete Session": {
+      "main": [[{ "node": "Respond Success", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": []
+}
