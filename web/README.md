@@ -4,7 +4,9 @@ A personal meeting intelligence tool: paste a transcript, get back decisions, ac
 
 ## Live demo
 
-→ **TODO: add Vercel URL here after deploy**
+→ **https://meeting-debrief.vercel.app**
+
+> The deploy talks to a self-hosted n8n instance exposed via ngrok. If the demo URL appears unresponsive, the n8n instance may be offline.
 
 ## Stack
 
